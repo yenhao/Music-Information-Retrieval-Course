@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def load_dataset(folder = '../datasets/Ballroom/'):
+    print('Loading Dataset')
     train_folder = os.path.join(folder, 'BallroomData')
     label_folder = os.path.join(folder, 'BallroomAnnotations')
 
@@ -27,7 +28,7 @@ def load_dataset(folder = '../datasets/Ballroom/'):
 
 
 def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_length = 2048):
-    D = librosa.stft(y, hop_length=hop_length, window_length=window_length) # spectrogram
+    D = librosa.stft(y, hop_length=hop_length, win_length=window_length) # spectrogram
     onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.median) # novetly curve
 
     tempo_frame = int(sr/hop_length) * tempo_second  # sub windows size with seconds
@@ -45,15 +46,30 @@ def bpm_filter(tempogram, tempo_block_size, lower_bpm = 60, upper_bpm=200):
     tempogram[upper_bound:, :] = 0
     return tempogram
 
-def filter_tempo(y, sr, tempo_second = 8, hop_length = 512, window_length = 2048):
+def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, window_length = 2048):
 
-    tempogram, tempo_hop = get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_length = 2048)
+    tempogram, tempo_hop = get_fourier_tempogram(y, sr, tempo_second = tempo_second, hop_length = hop_length, window_length = window_length)
 
-    tempo_freq = sr/hop/2 # tempogram's y-axis max value
+    tempo_freq = sr/hop_length/2 # tempogram's y-axis max value
     tempo_max_bpm = tempo_freq * 60 # tempogram's max bpm
     tempo_block_size = tempo_max_bpm / tempogram.shape[0] # get each value of tempogram's size
 
     filter_tempo_freq = bpm_filter(tempogram, tempo_block_size) # only 60 ~ 200 bpm left
+    filter_tempo_mean = np.mean(filter_tempo_freq, axis=1) # get the average strength for each frequency
+    ordered_freq = filter_tempo_mean.argsort()[::-1] * tempo_block_size # in descending and in frequency unit
+
+
+    Top1_tempo = ordered_freq[0]
+
+    Top1_tempo_plus, Top1_tempo_minus = Top1_tempo*(1+tempo_gap_rate), Top1_tempo*(1-tempo_gap_rate)
+    filtered_ordered_freq = ordered_freq[(ordered_freq>= Top1_tempo_plus) | (ordered_freq <= Top1_tempo_minus)]
+
+    Top2_tempo = filtered_ordered_freq[0]
+
+    if Top1_tempo < Top2_tempo:
+        Top1_tempo, Top2_tempo = Top2_tempo, Top1_tempo
+
+    return Top1_tempo, Top2_tempo
 
 
 if __name__ == "__main__":
@@ -63,6 +79,9 @@ if __name__ == "__main__":
     for genre, music in music_files.items():
         for filename, (y, sr) in music.items():
             print(genre, filename)
+            print(get_tempo(y, sr))
+            break
+
 
 
 
