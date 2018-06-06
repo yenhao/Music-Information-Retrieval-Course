@@ -2,7 +2,6 @@ import os
 import librosa
 import librosa.display
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 def load_dataset(folder = '../datasets/Ballroom/'):
@@ -15,9 +14,13 @@ def load_dataset(folder = '../datasets/Ballroom/'):
         for file_loc in f.readlines():
             _, genre, filename = file_loc.strip().split('/')
             if music_files.get(genre) == None:
-                music_files[genre] = {filename: librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None)}
+                music_files[genre] = {filename: {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0}}
             else:
-                music_files[genre][filename] = librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None)
+                music_files[genre][filename] = {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0}
+
+            #load labels
+            with open(os.path.join(label_folder,os.path.join('ballroomGroundTruth', "".join(filename.split('.')[:-1])+'.bpm'))) as l:
+                music_files[genre][filename]['label'] = int(l.read().strip())
 
     print('File Loaded!')
     for genre, music in music_files.items():
@@ -89,17 +92,39 @@ def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, w
 
     return top_tempo_select(ordered_freq, tempo_gap_rate)
 
+def p_score(t1,t2, y):
+    saliency = t1 / (t1+t2)
+
+    Tt1 = 1 if (y-t1)/y < 0.08 else 0
+    Tt2 = 1 if (y - t2) / y < 0.08 else 0
+
+    p = saliency * Tt1 + (1 - saliency)*Tt2
+
+    # at least one tempo correct
+    alotc = 1 if (y-t1)/y < 0.08 else 0
+
+    if alotc == 0:
+        alotc = 1 if (y - t2) / y < 0.08 else 0
+
+    return p, alotc
 
 if __name__ == "__main__":
 
     music_files = load_dataset()
 
     for genre, music in music_files.items():
-        for filename, (y, sr) in music.items():
+        for filename, sig_label in music.items():
             print(genre, filename)
-            print(get_tempo(y, sr))
-            print(get_tempo(y, sr, tempogram_type='acf'))
-            break
+            (y, sr) = sig_label['signal']
+            label = sig_label['label']
+            fourier_tempo = get_tempo(y, sr)
+            print(fourier_tempo)
+            print(p_score(fourier_tempo[0], fourier_tempo[1], label))
+            acf_tempo = get_tempo(y, sr, tempogram_type='acf')
+            print(acf_tempo)
+            print(p_score(acf_tempo[0], acf_tempo[1], label))
+
+
 
 
 
