@@ -39,30 +39,19 @@ def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_leng
 
 
 def bpm_filter(tempogram, tempo_block_size, lower_bpm = 60, upper_bpm=200):
-    lower_bound = int(lower_bpm / tempo_block_size) #
+    lower_bound = int(lower_bpm / tempo_block_size)
     upper_bound = int(upper_bpm / tempo_block_size) + 1
 
     tempogram[:lower_bound, :] = 0
     tempogram[upper_bound:, :] = 0
     return tempogram
 
-def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, window_length = 2048):
+def top_tempo_select(order_tempo_freq, tempo_gap_rate=0.25):
 
-    tempogram, tempo_hop = get_fourier_tempogram(y, sr, tempo_second = tempo_second, hop_length = hop_length, window_length = window_length)
-
-    tempo_freq = sr/hop_length/2 # tempogram's y-axis max value
-    tempo_max_bpm = tempo_freq * 60 # tempogram's max bpm
-    tempo_block_size = tempo_max_bpm / tempogram.shape[0] # get each value of tempogram's size
-
-    filter_tempo_freq = bpm_filter(tempogram, tempo_block_size) # only 60 ~ 200 bpm left
-    filter_tempo_mean = np.mean(filter_tempo_freq, axis=1) # get the average strength for each frequency
-    ordered_freq = filter_tempo_mean.argsort()[::-1] * tempo_block_size # in descending and in frequency unit
-
-
-    Top1_tempo = ordered_freq[0]
+    Top1_tempo = order_tempo_freq[0]
 
     Top1_tempo_plus, Top1_tempo_minus = Top1_tempo*(1+tempo_gap_rate), Top1_tempo*(1-tempo_gap_rate)
-    filtered_ordered_freq = ordered_freq[(ordered_freq>= Top1_tempo_plus) | (ordered_freq <= Top1_tempo_minus)]
+    filtered_ordered_freq = order_tempo_freq[(order_tempo_freq>= Top1_tempo_plus) | (order_tempo_freq <= Top1_tempo_minus)]
 
     Top2_tempo = filtered_ordered_freq[0]
 
@@ -70,6 +59,35 @@ def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, w
         Top1_tempo, Top2_tempo = Top2_tempo, Top1_tempo
 
     return Top1_tempo, Top2_tempo
+
+def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, window_length = 2048, tempogram_type='fourier'):
+
+    if tempogram_type == 'fourier':
+        tempogram, tempo_hop = get_fourier_tempogram(y, sr, tempo_second = tempo_second, hop_length = hop_length, window_length = window_length)
+
+        tempo_freq = sr/hop_length/2 # tempogram's y-axis max value
+        tempo_max_bpm = tempo_freq * 60 # tempogram's max bpm
+        tempo_block_size = tempo_max_bpm / tempogram.shape[0] # get each value of tempogram's size
+
+        filter_tempo_freq = bpm_filter(tempogram, tempo_block_size)  # only 60 ~ 200 bpm left
+        filter_tempo_mean = np.mean(filter_tempo_freq, axis=1)  # get the average strength for each frequency
+        ordered_freq = filter_tempo_mean.argsort()[::-1] * tempo_block_size  # in descending and in frequency unit
+
+    elif tempogram_type == 'acf':
+        acf_tempogram = librosa.feature.tempogram(y=y, sr=sr, hop_length=hop_length)
+        lag_block_size = 1/(sr/hop_length) # lag time for each y-axis
+        acf_scale = np.array(range(acf_tempogram.shape[0])) * lag_block_size # all possible lag for this tempogram [box_size, box_size*2, box_size*3 ... box_size *400]
+        acf_bpm = 60 / (acf_scale+1e-16) # convert lag to bpm
+
+        possible_idx = (acf_bpm <= 200) & (acf_bpm >= 60) # index for bpm 60 ~ 200
+        strength_order = np.mean(acf_tempogram, axis=1)[possible_idx].argsort()[::-1] # bpm tempogram order by strength in 60~200
+        ordered_freq = acf_bpm[possible_idx][strength_order] # ordered bpm value in 60~200
+
+    else:
+        raise 'Tempogram Type Error!'
+
+
+    return top_tempo_select(ordered_freq, tempo_gap_rate)
 
 
 if __name__ == "__main__":
@@ -80,6 +98,7 @@ if __name__ == "__main__":
         for filename, (y, sr) in music.items():
             print(genre, filename)
             print(get_tempo(y, sr))
+            print(get_tempo(y, sr, tempogram_type='acf'))
             break
 
 
