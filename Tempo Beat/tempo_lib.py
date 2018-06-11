@@ -17,13 +17,19 @@ def load_dataset(folder = '../datasets/Ballroom/'):
             _, genre, filename = file_loc.strip().split('/')
             genre = genre.split('-')[0]
             if music_files.get(genre) == None:
-                music_files[genre] = {filename: {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0}}
+                music_files[genre] = {filename: {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0, 'beats_time':None}}
             else:
-                music_files[genre][filename] = {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0}
+                music_files[genre][filename] = {'signal':librosa.load(os.path.join(train_folder, file_loc.strip()), sr=None), 'label':0, 'beats_time':None}
 
             #load labels
             with open(os.path.join(label_folder,os.path.join('ballroomGroundTruth', "".join(filename.split('.')[:-1])+'.bpm'))) as l:
                 music_files[genre][filename]['label'] = int(l.read().strip())
+
+            #load beats labels
+            beat_label_folder = os.path.join(label_folder, os.path.join("BallroomAnnotations", "".join(filename.split('.')[:-1]) + ".beats"))
+            with open(beat_label_folder) as f:
+                music_files[genre][filename]['beats_time'] = np.array([float(bt.strip().split()[0]) for bt in f.readlines()])
+
 
     print('File Loaded!')
     for genre, music in music_files.items():
@@ -35,7 +41,7 @@ def load_dataset(folder = '../datasets/Ballroom/'):
 
 def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_length = 2048):
     D = librosa.stft(y, hop_length=hop_length, win_length=window_length) # spectrogram
-    onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.median) # novetly curve
+    onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.mean)  # novetly curve   np.median/ np.mean/ None
 
     tempo_frame = int(sr/hop_length) * tempo_second  # sub windows size with seconds
     tempo_hop = int(tempo_frame/8) # while librosa recommend to set as 1
@@ -44,7 +50,7 @@ def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_leng
     return tempogram, tempo_hop
 
 
-def bpm_filter(tempogram, tempo_block_size, lower_bpm = 60, upper_bpm=240):
+def bpm_filter(tempogram, tempo_block_size, lower_bpm = 80, upper_bpm=210):
     lower_bound = int(lower_bpm / tempo_block_size)
     upper_bound = int(upper_bpm / tempo_block_size) + 1
 
@@ -80,8 +86,7 @@ def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, w
         ordered_freq = filter_tempo_mean.argsort()[::-1] * tempo_block_size  # in descending and in frequency unit
 
     elif tempogram_type == 'acf':
-        onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length,
-                                                 aggregate=np.median)  # novetly curve
+        onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.mean)  # novetly curve   np.median/ np.mean/ None
         acf_tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr, hop_length=hop_length)
         # acf_tempogram = librosa.feature.tempogram(y=y, sr=sr, hop_length=hop_length)
         lag_block_size = 1/(sr/hop_length) # lag time for each y-axis
@@ -113,6 +118,31 @@ def p_score(t1,t2, y):
         alotc = 1 if abs(y-t2)/y < 0.08 else 0
 
     return p, alotc, t2/t1, t1/y, t2/y
+
+
+def get_Precision(label, pred):
+    tp, fp = 0, 0
+    for p in pred:
+        if label[(label >= p - 0.07) & (label <= p + 0.07)].size > 0:  # match
+            tp += 1
+        else:  # false alarm
+            fp += 1
+    return tp / (tp + fp) if tp > 0 else 0
+
+
+def get_Recall(label, pred):
+    tp, fn = 0, 0
+    for l in label:
+        if pred[(pred >= l - 0.07) & (pred <= l + 0.07)].size > 0:  # match, tp
+            tp += 1
+        else:  # miss, false negative
+            fn += 1
+    return tp / (tp + fn) if tp > 0 else 0
+
+def get_F1_score(label, pred):
+    precision = get_Precision(label, pred)
+    recall = get_Recall(label, pred)
+    return 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
 if __name__ == "__main__":
 
@@ -151,6 +181,14 @@ if __name__ == "__main__":
             print(acf_tempo)
             print(acf_p_score)
 
+            # beats tracking
+            tempo, beats = librosa.beat.beat_track(y=y, sr=sr) # global tempo and the frame of beat
+            beats_time = librosa.frames_to_time(beats, sr=sr) # get the time of beat
+            beats_time = beats_time[beats_time<=30] # limited on smaller than 30
+
+            beats_F1_score = get_F1_score(music_files[genre][filename]['beats_time'], beats_time)
+            print(beats_F1_score)
+
 
 
             # save to pandas
@@ -172,7 +210,8 @@ if __name__ == "__main__":
                                     'fourier_saliency_p_score_mul3':[fourier_p_score_mut_3[0]], 'fourier_alotc_p_score_mul3':[fourier_p_score_mut_3[1]],
                                     'acf_saliency_p_score_mul3':[acf_p_score_mut_3[0]], 'acf_alotc_p_score_mul3':[acf_p_score_mut_3[1]],
                                     'fourier_saliency_p_score_mul4':[fourier_p_score_mut_4[0]], 'fourier_alotc_p_score_mul4':[fourier_p_score_mut_4[1]],
-                                    'acf_saliency_p_score_mul4':[acf_p_score_mut_4[0]], 'acf_alotc_p_score_mul4':[acf_p_score_mut_4[1]]}))
+                                    'acf_saliency_p_score_mul4':[acf_p_score_mut_4[0]], 'acf_alotc_p_score_mul4':[acf_p_score_mut_4[1]],
+                                    'beats_F1_score':beats_F1_score}))
 
     p_score_res_pd.to_pickle('ballroom_res_pd.pkl')
 
