@@ -41,7 +41,7 @@ def load_dataset(folder = '../datasets/Ballroom/'):
 
 def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_length = 2048):
     D = librosa.stft(y, hop_length=hop_length, win_length=window_length) # spectrogram
-    onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.mean)  # novetly curve   np.median/ np.mean/ None
+    onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.median)  # novetly curve   np.median/ np.mean/ None
 
     tempo_frame = int(sr/hop_length) * tempo_second  # sub windows size with seconds
     tempo_hop = int(tempo_frame/8) # while librosa recommend to set as 1
@@ -50,7 +50,7 @@ def get_fourier_tempogram(y, sr, tempo_second = 8, hop_length = 512, window_leng
     return tempogram, tempo_hop
 
 
-def bpm_filter(tempogram, tempo_block_size, lower_bpm = 80, upper_bpm=210):
+def bpm_filter(tempogram, tempo_block_size, lower_bpm = 60, upper_bpm=220):
     lower_bound = int(lower_bpm / tempo_block_size)
     upper_bound = int(upper_bpm / tempo_block_size) + 1
 
@@ -81,19 +81,19 @@ def get_tempo(y, sr, tempo_gap_rate = 0.25,tempo_second = 8, hop_length = 512, w
         tempo_max_bpm = tempo_freq * 60 # tempogram's max bpm
         tempo_block_size = tempo_max_bpm / tempogram.shape[0] # get each value of tempogram's size
 
-        filter_tempo_freq = bpm_filter(tempogram, tempo_block_size)  # only 60 ~ 200 bpm left
+        filter_tempo_freq = bpm_filter(tempogram, tempo_block_size)  # only 60 ~ 240 bpm left
         filter_tempo_mean = np.mean(filter_tempo_freq, axis=1)  # get the average strength for each frequency
         ordered_freq = filter_tempo_mean.argsort()[::-1] * tempo_block_size  # in descending and in frequency unit
 
     elif tempogram_type == 'acf':
-        onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.mean)  # novetly curve   np.median/ np.mean/ None
+        onset_env = librosa.onset.onset_strength(y, sr=sr, hop_length=hop_length, n_fft=window_length, aggregate=np.median)  # novetly curve   np.median/ np.mean/ None
         acf_tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr, hop_length=hop_length)
         # acf_tempogram = librosa.feature.tempogram(y=y, sr=sr, hop_length=hop_length)
         lag_block_size = 1/(sr/hop_length) # lag time for each y-axis
         acf_scale = np.array(range(acf_tempogram.shape[0])) * lag_block_size # all possible lag for this tempogram [box_size, box_size*2, box_size*3 ... box_size *400]
         acf_bpm = 60 / (acf_scale+1e-16) # convert lag to bpm
 
-        possible_idx = (acf_bpm <= 240) & (acf_bpm >= 60) # index for bpm 60 ~ 200
+        possible_idx = (acf_bpm <= 220) & (acf_bpm >= 60) # index for bpm 60 ~ 240
         strength_order = np.mean(acf_tempogram, axis=1)[possible_idx].argsort()[::-1] # bpm tempogram order by strength in 60~200
         ordered_freq = acf_bpm[possible_idx][strength_order] # ordered bpm value in 60~200
 
@@ -186,7 +186,11 @@ if __name__ == "__main__":
             beats_time = librosa.frames_to_time(beats, sr=sr) # get the time of beat
             beats_time = beats_time[beats_time<=30] # limited on smaller than 30
 
-            beats_F1_score = get_F1_score(music_files[genre][filename]['beats_time'], beats_time)
+            beats_F1_score = get_F1_score(sig_label['beats_time'], beats_time)
+            precision = get_Precision(sig_label['beats_time'], beats_time)
+            recall = get_Recall(sig_label['beats_time'], beats_time)
+            print(precision)
+            print(recall)
             print(beats_F1_score)
 
 
@@ -211,9 +215,9 @@ if __name__ == "__main__":
                                     'acf_saliency_p_score_mul3':[acf_p_score_mut_3[0]], 'acf_alotc_p_score_mul3':[acf_p_score_mut_3[1]],
                                     'fourier_saliency_p_score_mul4':[fourier_p_score_mut_4[0]], 'fourier_alotc_p_score_mul4':[fourier_p_score_mut_4[1]],
                                     'acf_saliency_p_score_mul4':[acf_p_score_mut_4[0]], 'acf_alotc_p_score_mul4':[acf_p_score_mut_4[1]],
-                                    'beats_F1_score':beats_F1_score}))
+                                    'beats_F1_score':beats_F1_score, 'beats_precision':precision, 'beats_recall':recall}))
 
-    p_score_res_pd.to_pickle('ballroom_res_pd.pkl')
+    p_score_res_pd.to_pickle('ballroom_res_pd_60_220_median.pkl')
 
 
 
